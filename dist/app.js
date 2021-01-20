@@ -37,11 +37,12 @@ function calculatePercentPrice(price, percent) {
 }
 async function getBalanceBySymbol(client, symbol) {
     const balances = await client.balance();
+    console.log(balances[symbol.replace('BTC', "")].available);
     return balances[symbol.replace('BTC', "")].available;
 }
 async function createStopLoss(client, symbol, quantity, price, stopPrice) {
     // create stop loss
-    return await client.sell(symbol, quantity, price, { stopPrice: stopPrice, type: "STOP_LOSS" });
+    return await client.sell(symbol, quantity, price, { stopPrice: stopPrice, type: "STOP_LOSS_LIMIT" });
 }
 function calculateMaxBuyQuantity(price, balance) {
     return balance / price;
@@ -51,13 +52,15 @@ function calculateMaxBuyQuantity(price, balance) {
     let secret = 'UZggnxZ7moBpHw74iGK9SkXHlnci6RAsajO7x1wptsGvgr2qs5lRNu6y5WvJZvDJ';
     let previousSymbols = {};
     let counter = 0;
-    let newSymbol = '';
+    let newSymbol = 'XLMBTC';
     let newSymbolPrice;
     let buyPrice = 0;
     let buyQuantity = 0;
     let stopLossPrice = 0;
     let stopLossStopPrice = 0;
     let stopLossStopQuantity = 0;
+    let lastSymbolPrice = 0;
+    let stopLossOrderResult;
     const client = new Binance().options({
         APIKEY: apikey,
         APISECRET: secret,
@@ -65,48 +68,79 @@ function calculateMaxBuyQuantity(price, balance) {
     const balances = await client.balance();
     const btcBalance = balances['BTC'];
     while (true) {
-        let currentSymbols = await client.prices();
-        currentSymbols = filterBtcPairSymbols(currentSymbols);
-        if (counter < 1) {
-            previousSymbols = currentSymbols;
-            counter++;
+        const lastPrice = await client.bookTickers(newSymbol);
+        newSymbolPrice = lastPrice.askPrice;
+        console.log(newSymbol + ": " + newSymbolPrice);
+        console.log(colors.green('BUY'));
+        buyPrice = newSymbolPrice;
+        buyQuantity = calculateMaxBuyQuantity(newSymbolPrice, btcBalance.available);
+        console.log("Symbol: " + newSymbol);
+        console.log("Buy Price: " + newSymbolPrice);
+        console.log("Buy Quantity: " + buyQuantity);
+        // buy new symbol
+        //const buyOrderResult = await client.buy(newSymbol, buyQuantity, buyQuantity);
+        if (newSymbolPrice > lastSymbolPrice) {
+            if (stopLossOrderResult
+                && stopLossOrderResult.orderId
+                && stopLossOrderResult.orderId > 0) {
+                const cancelResult = await client.cancel(newSymbol, stopLossOrderResult.orderId);
+                console.log(cancelResult);
+                if (cancelResult &&
+                    cancelResult.orderId
+                    && cancelResult.orderId > 0
+                    && cancelResult.status === 'CANCELED') {
+                    stopLossPrice = Number((newSymbolPrice - calculatePercentPrice(newSymbolPrice, 5)).toFixed(8));
+                    stopLossStopPrice = Number((stopLossPrice - calculatePercentPrice(stopLossPrice, 1)).toFixed(8));
+                    stopLossStopQuantity = await getBalanceBySymbol(client, newSymbol);
+                    stopLossStopQuantity = Number((stopLossStopQuantity - calculatePercentPrice(stopLossStopQuantity, 1)).toFixed(0));
+                    console.log(colors.red('STOP LOSS'));
+                    console.log("Stop Loss Price: " + stopLossPrice);
+                    console.log("Stop Loss Stop Price: " + stopLossStopPrice);
+                    console.log("Stop Loss Quantity: " + stopLossStopQuantity);
+                    client.sell(newSymbol, stopLossStopQuantity, stopLossPrice, {
+                        stopPrice: stopLossStopPrice,
+                        type: "STOP_LOSS_LIMIT"
+                    }, (error, response) => {
+                        console.log(error);
+                        console.log(response);
+                        if (error) {
+                            return error;
+                        }
+                        else {
+                            stopLossOrderResult = response;
+                            console.log(stopLossOrderResult);
+                            return response;
+                        }
+                    });
+                }
+            }
+            else {
+                stopLossPrice = Number((newSymbolPrice - calculatePercentPrice(newSymbolPrice, 5)).toFixed(8));
+                stopLossStopPrice = Number((stopLossPrice - calculatePercentPrice(stopLossPrice, 1)).toFixed(8));
+                stopLossStopQuantity = await getBalanceBySymbol(client, newSymbol);
+                stopLossStopQuantity = Number((stopLossStopQuantity - calculatePercentPrice(stopLossStopQuantity, 1)).toFixed(0));
+                console.log(colors.red('STOP LOSS'));
+                console.log("Stop Loss Price: " + stopLossPrice);
+                console.log("Stop Loss Stop Price: " + stopLossStopPrice);
+                console.log("Stop Loss Quantity: " + stopLossStopQuantity);
+                client.sell(newSymbol, stopLossStopQuantity, stopLossPrice, {
+                    stopPrice: stopLossStopPrice,
+                    type: "STOP_LOSS_LIMIT"
+                }, (error, response) => {
+                    console.log(error);
+                    console.log(response);
+                    if (error) {
+                        return error;
+                    }
+                    else {
+                        stopLossOrderResult = response;
+                        console.log(stopLossOrderResult);
+                        return response;
+                    }
+                });
+            }
         }
-        //if (Object.keys(currentSymbols).length > Object.keys(previousSymbols).length) {
-        if (Object.keys(b).length > Object.keys(a).length) {
-            //newSymbol = getNewSymbol(previousSymbols, currentSymbols);
-            newSymbol = getNewSymbol(a, b);
-            previousSymbols = currentSymbols;
-        }
-        if (newSymbol.length > 0) {
-            const lastPrice = await client.bookTickers(newSymbol);
-            newSymbolPrice = lastPrice.askPrice;
-            console.log(colors.green('NEW SYMBOL')); // outputs green text
-            console.log(newSymbol + ": " + newSymbolPrice);
-            console.log(colors.green('BUY'));
-            buyPrice = newSymbolPrice;
-            buyQuantity = calculateMaxBuyQuantity(newSymbolPrice, btcBalance.available);
-            console.log("Symbol: " + newSymbol);
-            console.log("Buy Price: " + newSymbolPrice);
-            console.log("Buy Quantity: " + buyQuantity);
-            // buy new symbol
-            //const buyOrderResult = await client.buy(newSymbol, buyQuantity, buyQuantity);
-            console.log(colors.red('STOP LOSS'));
-            stopLossPrice = newSymbolPrice;
-            stopLossStopPrice = Number((newSymbolPrice - calculatePercentPrice(newSymbolPrice, 10)).toFixed(8));
-            stopLossStopQuantity = await getBalanceBySymbol(client, newSymbol);
-            console.log("Stop Loss Price: " + stopLossPrice);
-            console.log("Stop Loss Stop Price: " + stopLossStopPrice);
-            console.log("Stop Loss Quantity: " + stopLossStopQuantity);
-            // create stop loss
-            //const stopLossOrderResult = await createStopLoss(client,
-            //    newSymbol, // symbol
-            //    stopLossStopQuantity, // quantity
-            //    stopLossPrice, // price
-            //    stopLossStopPrice) // stop price
-        }
-        //console.log(symbols);
-        //console.log(numberOfSymbols);
-        //console.log(symbolsNames);
+        lastSymbolPrice = newSymbolPrice;
         await sleep(500);
     }
 })();
